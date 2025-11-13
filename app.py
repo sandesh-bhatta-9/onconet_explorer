@@ -5,8 +5,8 @@ import plotly.graph_objects as go
 from collections import Counter
 from bioservices import KEGG
 import concurrent.futures
-import base64                # <-- Added import
-from pathlib import Path       # <-- Added import
+import base64
+from pathlib import Path
 
 # --- 1. Page Configuration ---
 st.set_page_config(page_title="Cancer Pathway Analyzer", layout="wide")
@@ -15,7 +15,6 @@ st.write("Compare cancer pathways against chemotherapy and natural product pathw
 
 # --- 2. Icon & KEGG Utilities ---
 
-# --- *** NEW ICON LOADING CODE *** ---
 ICON_NAMES = ["Gene Cards", "NCBI", "ENSEMBL", "KEGG", "GEO"]
 ICONS_DIR = Path(__file__).parent / "Icons"
 
@@ -34,7 +33,6 @@ def load_icons_b64():
     return icon_map
 
 ICON_B64 = load_icons_b64()
-# --- *** END ICON LOADING CODE *** ---
 
 @st.cache_data
 def get_all_kegg_pathways():
@@ -91,7 +89,6 @@ def generate_url_links(gene_name: str) -> dict:
         "GEO_URL": f"https://www.ncbi.nlm.nih.gov/gds/?term={gene_name}",
     }
 
-# --- *** REPLACED generate_text_links WITH generate_icon_links *** ---
 def generate_icon_links(gene_name: str) -> dict:
     """
     Generates HTML links using the pre-loaded B64 icons.
@@ -106,14 +103,10 @@ def generate_icon_links(gene_name: str) -> dict:
     for db, url in urls.items():
         b64src = ICON_B64.get(db)
         if b64src:
-            # Display the image logo
             html[db] = (f'<a href="{url}" target="_blank"><img src="{b64src}" width="24" height="24" style="margin:2px; border-radius:4px; border:1px solid #ccc;"></a>')
         else:
-            # Fallback to text link if icon is missing
             html[db] = f'<a href="{url}" target="_blank">{db}</a>'
     return html
-# --- *** END OF REPLACEMENT *** ---
-
 
 # --- 3. Sidebar ---
 all_paths = get_all_kegg_pathways()
@@ -138,23 +131,56 @@ cancer_options = {n:pid for n,pid in all_paths.items() if any(k in n.lower() for
 chemo_options = {n:pid for n,pid in all_paths.items() if any(k in n.lower() for k in CHEMO_KEYWORDS)}
 natural_options = {n:pid for n,pid in all_paths.items() if any(k in n.lower() for k in NATURAL_PRODUCT_KEYWORDS)}
 
+
+# --- *** NEW: EXAMPLE BUTTONS & SESSION STATE *** ---
+st.sidebar.markdown("---")
+st.sidebar.subheader("Load Examples")
+
+def set_example_state(simple=True):
+    """Callback function to set the session state for example buttons."""
+    if simple:
+        # Simple Example: 1 Cancer vs 1 Chemo
+        st.session_state.cancer_key = [k for k in cancer_options.keys() if "Melanoma" in k]
+        st.session_state.chemo_key = [k for k in chemo_options.keys() if "Platinum" in k]
+        st.session_state.natural_key = []
+    else:
+        # Complex Example: 3 Cancers vs 1 Chemo vs 1 Natural
+        st.session_state.cancer_key = [k for k in cancer_options.keys() if k in ["Melanoma", "Renal cell carcinoma", "Gastric cancer"]]
+        st.session_state.chemo_key = [k for k in chemo_options.keys() if "Platinum" in k]
+        st.session_state.natural_key = [k for k in natural_options.keys() if "cytochrome P450" in k]
+
+# Initialize session state keys for multiselect widgets
+# This sets the *initial* default when the app first loads
+if "cancer_key" not in st.session_state:
+    st.session_state.cancer_key = [k for k in cancer_options.keys() if k in ["Melanoma", "Renal cell carcinoma"]]
+if "chemo_key" not in st.session_state:
+    st.session_state.chemo_key = []
+if "natural_key" not in st.session_state:
+    st.session_state.natural_key = []
+
+st.sidebar.button("Load Simple Example (1 vs 1)", on_click=set_example_state, args=(True,))
+st.sidebar.button("Load Complex Example (3 vs 2)", on_click=set_example_state, args=(False,))
+st.sidebar.markdown("---")
+# --- *** END OF NEW SECTION *** ---
+
+
 st.sidebar.subheader("Cancer Pathways")
 sel_cancer = st.sidebar.multiselect(
     "Select cancer types:", 
     list(cancer_options.keys()), 
-    default=[k for k in cancer_options.keys() if k in ["Melanoma", "Renal cell carcinoma"]]
+    key="cancer_key" # <-- MODIFIED: Use session state key
 )
 
 st.sidebar.subheader("Therapeutic Pathways")
 sel_chemo = st.sidebar.multiselect(
     "Select chemotherapy pathways:", 
     list(chemo_options.keys()), 
-    default=[]
+    key="chemo_key" # <-- MODIFIED: Use session state key
 )
 sel_natural = st.sidebar.multiselect(
     "Select natural product pathways:", 
     list(natural_options.keys()), 
-    default=[]
+    key="natural_key" # <-- MODIFIED: Use session state key
 )
 
 combined_options = {**cancer_options, **chemo_options, **natural_options}
@@ -267,13 +293,16 @@ if selected_pathways:
     # --- 4d. Shared Gene Analysis (MOVED SECOND) ---
     st.header("📊 Shared Gene Analysis")
     
+    # --- *** NEW: GENE SEARCH BOX *** ---
+    gene_filter = st.text_input("Search for a specific gene in the tables below (e.g., 'TP53')").strip().upper()
+    # --- *** END OF NEW SECTION *** ---
+
     genes_all_cancers = sorted([g for g, c in g2c.items() if len(c) == total_selected_cancers])
     genes_some_cancers = sorted([g for g, c in g2c.items() if 1 < len(c) < total_selected_cancers])
     genes_one_cancer = sorted([g for g, c in g2c.items() if len(c) == 1])
 
     analysis_tabs = st.tabs(["🧬 Shared by ALL Cancers", "🧬 Shared by SOME Cancers", "🧬 Unique to ONE Cancer"])
 
-    # --- *** MODIFIED TABS TO USE generate_icon_links *** ---
     with analysis_tabs[0]:
         st.subheader(f"Genes in {total_selected_cancers} of {total_selected_cancers} selected cancers")
         if not genes_all_cancers and total_selected_cancers > 1:
@@ -282,10 +311,14 @@ if selected_pathways:
             st.info("Select at least two cancer pathways to see this comparison.")
         else:
             st.write(f"Found {len(genes_all_cancers)} genes common to all selected cancers.")
-            # --- MODIFIED ---
             display_data = [{'Gene': g, 'Pathways': ', '.join([n for n, gs in p2g.items() if g in gs]), **generate_icon_links(g)} for g in genes_all_cancers]
             df_display = pd.DataFrame(display_data).sort_values(by="Gene")
-            cols_display = ['Gene','Pathways','Gene Cards','NCBI','ENSEMBL','GEO'] # Columns for icon links
+            
+            # --- MODIFIED: Apply Filter ---
+            if gene_filter:
+                df_display = df_display[df_display['Gene'].str.upper().str.contains(gene_filter)]
+            
+            cols_display = ['Gene','Pathways','Gene Cards','NCBI','ENSEMBL','GEO']
             st.write(df_display[cols_display].to_html(escape=False,index=False), unsafe_allow_html=True)
             
     with analysis_tabs[1]:
@@ -294,10 +327,14 @@ if selected_pathways:
             st.info("No genes were found to be shared by *some* (but not all) selected cancers.")
         else:
             st.write(f"Found {len(genes_some_cancers)} genes shared by some selected cancers.")
-            # --- MODIFIED ---
             display_data = [{'Gene': g, 'Cancers': ', '.join(g2c[g]), **generate_icon_links(g)} for g in genes_some_cancers]
             df_display = pd.DataFrame(display_data).sort_values(by="Gene")
-            cols_display = ['Gene','Cancers','Gene Cards','NCBI','ENSEMBL','GEO'] # Columns for icon links
+
+            # --- MODIFIED: Apply Filter ---
+            if gene_filter:
+                df_display = df_display[df_display['Gene'].str.upper().str.contains(gene_filter)]
+
+            cols_display = ['Gene','Cancers','Gene Cards','NCBI','ENSEMBL','GEO']
             st.write(df_display[cols_display].to_html(escape=False,index=False), unsafe_allow_html=True)
 
     with analysis_tabs[2]:
@@ -306,12 +343,15 @@ if selected_pathways:
             st.info("No genes were found to be unique to a single selected cancer pathway.")
         else:
             st.write(f"Found {len(genes_one_cancer)} genes unique to one selected cancer.")
-            # --- MODIFIED ---
             display_data = [{'Gene': g, 'Cancer Pathway': list(g2c[g])[0], **generate_icon_links(g)} for g in genes_one_cancer]
             df_display = pd.DataFrame(display_data).sort_values(by="Cancer Pathway")
-            cols_display = ['Gene','Cancer Pathway','Gene Cards','NCBI','ENSEMBL','GEO'] # Columns for icon links
+            
+            # --- MODIFIED: Apply Filter ---
+            if gene_filter:
+                df_display = df_display[df_display['Gene'].str.upper().str.contains(gene_filter)]
+            
+            cols_display = ['Gene','Cancer Pathway','Gene Cards','NCBI','ENSEMBL','GEO']
             st.write(df_display[cols_display].to_html(escape=False,index=False), unsafe_allow_html=True)
-    # --- *** END OF TAB MODIFICATIONS *** ---
 
 
     # --- 4e. Download Section ---
